@@ -1,0 +1,71 @@
+name: Archive qualification
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  portable-core:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify and extract the published source
+        shell: python
+        run: |
+          import hashlib, pathlib, zipfile
+          archive = pathlib.Path('ULTRA-Motion-0.4.1-development.zip')
+          assert hashlib.sha256(archive.read_bytes()).hexdigest() == 'a82fb3ce77088000d7fe85b631186869fb6abc66ecd3bb24ba57493f3798c7ab'
+          with zipfile.ZipFile(archive) as source:
+              assert source.testzip() is None
+              for entry in source.infolist():
+                  path = pathlib.PurePosixPath(entry.filename)
+                  assert path.parts[0] == 'reelcraft' and '..' not in path.parts and not path.is_absolute()
+                  assert entry.file_size < 50*1024*1024
+              source.extractall('.')
+      - name: Check portable project, worker, MCP and branch behavior
+        working-directory: reelcraft
+        run: python -m unittest studio.tests.test_project_v2 studio.tests.test_jobs_v2 studio.tests.test_mcp_v2 studio.tests.test_branch_store studio.tests.test_analysis_v2 -v
+  full-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify and extract the published source
+        shell: python
+        run: |
+          import hashlib, pathlib, zipfile
+          archive = pathlib.Path('ULTRA-Motion-0.4.1-development.zip')
+          assert hashlib.sha256(archive.read_bytes()).hexdigest() == 'a82fb3ce77088000d7fe85b631186869fb6abc66ecd3bb24ba57493f3798c7ab'
+          with zipfile.ZipFile(archive) as source:
+              assert source.testzip() is None
+              for entry in source.infolist():
+                  path = pathlib.PurePosixPath(entry.filename)
+                  assert path.parts[0] == 'reelcraft' and '..' not in path.parts and not path.is_absolute()
+                  assert entry.file_size < 50*1024*1024
+              source.extractall('.')
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - working-directory: reelcraft
+        run: python -m pip install -r requirements-exports.txt
+      - working-directory: reelcraft
+        run: npm test
+      - working-directory: reelcraft
+        run: python -m unittest discover -s studio/tests -v
+      - working-directory: reelcraft
+        run: python evals/validate-fixtures.py
+      - working-directory: reelcraft
+        run: python evals/run-engagements.py --output evals/results/portable-linux.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-linux-engagements
+          path: reelcraft/evals/results/portable-linux.json
